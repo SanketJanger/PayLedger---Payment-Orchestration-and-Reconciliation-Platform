@@ -92,9 +92,15 @@ services:
     command: ["python", "-m", "app.worker"]
     environment:
       TEMPORAL_ADDRESS: temporal:7233
+      DATABASE_URL: postgresql+psycopg://payledger:payledger_local@db:5432/payledger
+      PROVIDER_URL: http://provider:8001
     depends_on:
       temporal:
         condition: service_healthy
+      db:
+        condition: service_healthy
+      provider:
+        condition: service_started
 
 volumes:
   postgres_data:
