@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
 from app.database import engine
+from app.payments import router as payments_router
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -23,6 +24,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.include_router(payments_router)
 
 
 @app.get("/health/live", tags=["Health"])
