@@ -12,6 +12,13 @@ from app.database import engine
 
 PROVIDER_URL = os.environ["PROVIDER_URL"].rstrip("/")
 
+# Local provider-simulator setting; default behavior has no delay.
+PROVIDER_RESPONSE_DELAY_SECONDS = int(
+    os.environ.get("PROVIDER_RESPONSE_DELAY_SECONDS", "0")
+)
+
+if not 0 <= PROVIDER_RESPONSE_DELAY_SECONDS <= 10:
+    raise ValueError("Provider response delay must be between 0 and 10 seconds")
 
 class ProviderCharge(BaseModel):
     id: UUID
@@ -82,6 +89,9 @@ def process_payment(payment_id: str) -> str:
                 f"{PROVIDER_URL}/charges",
                 headers={
                     "Idempotency-Key": f"payment-{payment_uuid}",
+                    "X-Simulate-Response-Delay-Seconds": str(
+                        PROVIDER_RESPONSE_DELAY_SECONDS
+                    ),
                 },
                 json={
                     "amount_minor": payment["amount_minor"],
@@ -90,6 +100,14 @@ def process_payment(payment_id: str) -> str:
             )
     except httpx.RequestError as exc:
         mark_unknown(payment_uuid)
+
+        activity.logger.warning(
+            "Provider outcome unknown: payment_id=%s attempt=%s error=%s",
+            payment_id,
+            activity.info().attempt,
+            type(exc).__name__,
+        )
+
         raise ApplicationError(
             "Provider outcome unknown after network error"
         ) from exc

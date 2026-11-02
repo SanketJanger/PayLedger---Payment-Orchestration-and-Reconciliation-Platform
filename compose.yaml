@@ -94,6 +94,7 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       DATABASE_URL: postgresql+psycopg://payledger:payledger_local@db:5432/payledger
       PROVIDER_URL: http://provider:8001
+      PROVIDER_RESPONSE_DELAY_SECONDS: "0"
     depends_on:
       temporal:
         condition: service_healthy
