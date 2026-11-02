@@ -146,6 +146,16 @@ def process_payment(payment_id: str) -> str:
 
     charge_id = str(charge.id)
 
+    # Local failure-injection hook, enabled for one explicit payment only.
+    if os.environ.get("SIMULATE_CRASH_AFTER_CHARGE_PAYMENT_ID") == payment_id:
+        activity.logger.warning(
+            "Simulating worker crash after provider charge: "
+            "payment_id=%s charge_id=%s",
+            payment_id,
+            charge_id,
+        )
+        os._exit(42)
+
     with engine.begin() as connection:
         current = connection.execute(
             text("""
