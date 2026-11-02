@@ -103,6 +103,21 @@ services:
       provider:
         condition: service_started
 
+  dispatcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.dispatcher"]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      DATABASE_URL: postgresql+psycopg://payledger:payledger_local@db:5432/payledger
+    depends_on:
+      temporal:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    restart: on-failure
+
 volumes:
   postgres_data:
   provider_postgres_data:
