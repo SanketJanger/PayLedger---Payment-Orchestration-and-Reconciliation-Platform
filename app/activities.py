@@ -9,6 +9,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from app.database import engine
+from app.ledger import ensure_capture_posting
 
 PROVIDER_URL = os.environ["PROVIDER_URL"].rstrip("/")
 
@@ -65,6 +66,11 @@ def process_payment(payment_id: str) -> str:
         payment = dict(row)
 
         if payment["status"] == "SUCCEEDED":
+            ensure_capture_posting(
+                connection,
+                payment,
+                require_existing=True,
+            )
             return payment["provider_charge_id"]
 
         if payment["status"] == "FAILED":
@@ -159,7 +165,7 @@ def process_payment(payment_id: str) -> str:
     with engine.begin() as connection:
         current = connection.execute(
             text("""
-                SELECT status, provider_charge_id
+                SELECT *
                 FROM payments
                 WHERE id = :id
                 FOR UPDATE
@@ -167,12 +173,20 @@ def process_payment(payment_id: str) -> str:
             {"id": payment_uuid},
         ).mappings().one()
 
+        current_payment = dict(current)
+
         if current["status"] == "SUCCEEDED":
             if current["provider_charge_id"] != charge_id:
                 raise ApplicationError(
                     "Conflicting provider charge IDs",
                     non_retryable=True,
                 )
+
+            ensure_capture_posting(
+                connection,
+                current_payment,
+                require_existing=True,
+            )
             return charge_id
 
         if current["status"] == "FAILED":
@@ -180,6 +194,18 @@ def process_payment(payment_id: str) -> str:
                 "Payment became failed during processing",
                 non_retryable=True,
             )
+
+        if (
+            current["amount_minor"] != charge.amount_minor
+            or current["currency"] != charge.currency
+            or current["merchant_id"] != payment["merchant_id"]
+        ):
+            raise ApplicationError(
+                "Payment details changed during provider processing",
+                non_retryable=True,
+            )
+
+        ensure_capture_posting(connection, current_payment)
 
         connection.execute(
             text("""
