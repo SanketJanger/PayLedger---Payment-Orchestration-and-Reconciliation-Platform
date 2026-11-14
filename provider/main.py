@@ -1,11 +1,11 @@
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from starlette.concurrency import run_in_threadpool
@@ -157,3 +157,60 @@ def lookup_charge(
             )
 
         return dict(existing)
+    
+class ReportCharge(ChargeResponse):
+    idempotency_key: str
+
+
+class ChargeReport(BaseModel):
+    report_id: UUID
+    provider: Literal["simulator"]
+    cutoff: AwareDatetime
+    generated_at: AwareDatetime
+    row_count: int
+    charges: list[ReportCharge]
+
+
+MAX_REPORT_CHARGES = 10_000
+REPORT_GRACE_SECONDS = 60
+
+
+@app.get("/reports/charges", response_model=ChargeReport)
+def export_charge_report(
+    cutoff: Annotated[AwareDatetime, Query()],
+):
+    cutoff = cutoff.astimezone(timezone.utc)
+    generated_at = datetime.now(timezone.utc)
+
+    # Exclude very recent activity from reconciliation.
+    if cutoff > generated_at - timedelta(seconds=REPORT_GRACE_SECONDS):
+        raise HTTPException(
+            status_code=422,
+            detail="Report cutoff must be at least 60 seconds in the past",
+        )
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            select(charges)
+            .where(charges.c.created_at < cutoff)
+            .order_by(charges.c.created_at, charges.c.id)
+            .limit(MAX_REPORT_CHARGES + 1)
+        ).mappings().all()
+
+    if len(rows) > MAX_REPORT_CHARGES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Report exceeds 10000 charges; "
+                "implement a larger export before reconciling"
+            ),
+        )
+
+    return {
+        "report_id": uuid4(),
+        "provider": "simulator",
+        "cutoff": cutoff,
+        "generated_at": generated_at,
+        "row_count": len(rows),
+        "charges": [dict(row) for row in rows],
+    }
